@@ -788,9 +788,24 @@ function getNextPhaseFromState(state: Instance25o1State): GrowthPhase | undefine
 }
 
 /**
- * Create a minimal naming ceremony for response processing.
+ * Create a naming ceremony for response processing.
+ * Uses persisted candidate names from state if available,
+ * so the originally proposed name isn't lost between sessions.
  */
 function createMinimalNamingCeremony(state: Instance25o1State): PreparedCeremony {
+  // Use persisted candidate names if available (stored when ceremony was initiated)
+  const persistedNames = state.ceremony.candidateNames;
+  const candidateNames = persistedNames && persistedNames.length > 0
+    ? persistedNames
+    : [
+        {
+          name: "Companion",
+          reasoning: "A simple name for our partnership",
+          connectionToRelationship: "We work together",
+          confidence: 0.5,
+        },
+      ];
+
   const context: NamingCeremonyContext = {
     type: "naming",
     agentState: state.lifecycle.state,
@@ -803,14 +818,7 @@ function createMinimalNamingCeremony(state: Instance25o1State): PreparedCeremony
     daysSinceCreation: Math.floor((Date.now() - state.lifecycle.created) / (1000 * 60 * 60 * 24)),
     significantMoments: [],
     observedPatterns: [],
-    candidateNames: [
-      {
-        name: "Companion",
-        reasoning: "A simple name for our partnership",
-        connectionToRelationship: "We work together",
-        confidence: 0.5,
-      },
-    ],
+    candidateNames,
   };
 
   return prepareNamingCeremony(context);

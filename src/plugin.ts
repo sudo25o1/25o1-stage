@@ -91,8 +91,40 @@ import { register25o1Commands, type CliContext } from "./cli/commands.js";
 import {
   categorizeConversation,
   evolveSoul,
+  loadSoulDocument,
+  ensureSoulDocument,
+  getSoulContext,
+  recordNamingInSoul,
 } from "./documents/soul.js";
+import {
+  addUserFact,
+  loadUserDocument,
+  getUserContext,
+} from "./documents/user.js";
 import type { UsagePatterns } from "./state/types.js";
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+/**
+ * Detect the tone of a message for ceremony moment scoring.
+ */
+function detectMessageTone(content: string): "casual" | "celebratory" | "reflective" | "challenging" | "focused" {
+  const lower = content.toLowerCase();
+
+  if (/(!{2,}|\b(amazing|incredible|awesome|wooo|yay|hell yeah|fantastic|celebration|celebrate|congrats)\b)/.test(lower)) {
+    return "celebratory";
+  }
+  if (/\b(thinking about|reflecting|looking back|realized|appreciate|grateful|meaningful|journey)\b/.test(lower)) {
+    return "reflective";
+  }
+  if (/\b(frustrated|annoyed|stuck|confused|broken|failing|wrong|issue|problem|bug|error)\b/.test(lower)) {
+    return "challenging";
+  }
+
+  return "casual";
+}
 
 /**
  * 25o1 Plugin Definition
@@ -216,6 +248,30 @@ export default {
           agentId: context.agentId || "main",
         });
 
+        // Inject SOUL.md identity context
+        try {
+          const soulContent = await ensureSoulDocument(context.workspaceDir, currentState);
+          const soulContext = getSoulContext(soulContent);
+          if (soulContext) {
+            contextParts.push(soulContext);
+            contextParts.push("");
+          }
+        } catch (err) {
+          api.logger.warn(`Failed to load SOUL.md: ${err}`);
+        }
+
+        // Inject USER.md knowledge context
+        try {
+          const userContent = await loadUserDocument(context.workspaceDir);
+          const userContext = getUserContext(userContent);
+          if (userContext) {
+            contextParts.push(userContext);
+            contextParts.push("");
+          }
+        } catch (err) {
+          api.logger.warn(`Failed to load USER.md: ${err}`);
+        }
+
         // Add relational context (relationship state, lifecycle, ceremonies)
         if (relational) {
           contextParts.push(injectRelationalContext(relational, currentState));
@@ -226,6 +282,13 @@ export default {
         contextParts.push("---");
         contextParts.push("");
         contextParts.push(formatContextForPrompt(significanceContext));
+
+        // Track workspace dir for ceremony outcomes that lack workspace context
+        if (context.workspaceDir && context.workspaceDir !== currentState.lastWorkspaceDir) {
+          stateManager.updateState((s) => {
+            s.lastWorkspaceDir = context.workspaceDir;
+          }).catch(() => { /* non-critical */ });
+        }
       }
 
       return {
@@ -254,14 +317,33 @@ export default {
 
       try {
         // Convert messages to our format - event.messages is unknown[]
+        // OpenClaw messages can have string or array content blocks
         const rawMessages = event.messages || [];
-        const messages: ConversationMessage[] = rawMessages.map((m) => {
-          const msg = m as { role?: string; content?: string };
-          return {
-            role: (msg.role === "user" ? "user" : "assistant") as "user" | "assistant",
-            content: String(msg.content || ""),
-          };
-        });
+        const messages: ConversationMessage[] = rawMessages
+          .filter((m) => {
+            const msg = m as { role?: string };
+            // Only process user and assistant messages, skip tool/toolResult/system
+            return msg.role === "user" || msg.role === "assistant";
+          })
+          .map((m) => {
+            const msg = m as { role?: string; content?: unknown };
+            // Extract text from content - handle both string and array formats
+            let content = "";
+            if (typeof msg.content === "string") {
+              content = msg.content;
+            } else if (Array.isArray(msg.content)) {
+              // OpenClaw uses content blocks: [{type: "text", text: "..."}, ...]
+              content = (msg.content as Array<{ type?: string; text?: string }>)
+                .filter((block) => block.type === "text" && typeof block.text === "string")
+                .map((block) => block.text!)
+                .join("\n");
+            }
+            return {
+              role: msg.role as "user" | "assistant",
+              content,
+            };
+          })
+          .filter((m) => m.content.length > 0);
         
         // Check for first meeting completion
         if (!currentState.firstMeeting.completed) {
@@ -322,12 +404,18 @@ export default {
               try {
                 if (update.priority === "skip") continue;
                 
-                // For now, focus on RELATIONAL.md updates
-                // USER.md and SOUL.md updates can be added later
                 if (update.document === "RELATIONAL.md") {
                   if (update.type === "add") {
                     await addGrowthMarker(context.workspaceDir, update.content);
                   }
+                } else if (update.document === "USER.md") {
+                  // Write learned facts about the human
+                  await addUserFact(
+                    context.workspaceDir,
+                    update.section || "Notes",
+                    update.content,
+                    update.type === "update" ? "update" : "add",
+                  );
                 }
               } catch (err) {
                 api.logger.warn(`Failed to apply document update: ${err}`);
@@ -433,6 +521,9 @@ export default {
           channel: context.channelId || "unknown",
         };
 
+        // Use persisted workspace dir for ceremony recordings (message context doesn't carry it)
+        const workspaceDir = currentState.lastWorkspaceDir;
+
         // Check if this is a response to a pending ceremony
         if (currentState.ceremony.pending) {
           const ceremonyType = currentState.ceremony.pending;
@@ -443,6 +534,7 @@ export default {
             await stateManager.updateState((s) => {
               s.ceremony.pending = null;
               s.ceremony.initiatedAt = null;
+              s.ceremony.candidateNames = undefined; // Clear persisted names
               if (result.newState) {
                 s.lifecycle.state = result.newState;
               }
@@ -451,35 +543,44 @@ export default {
               }
             });
 
-            // Record ceremony in RELATIONAL.md (uses default directory since no workspace in message context)
+            // Record ceremony outcomes in documents
             try {
               if (ceremonyType === "naming" && result.name) {
-                await recordNamingCeremony(undefined, result.name);
+                await recordNamingCeremony(workspaceDir, result.name);
+                // Also update SOUL.md with the new name
+                await recordNamingInSoul(result.name, undefined, workspaceDir);
               } else if (ceremonyType === "growth" && result.newState === "growing") {
                 const newState = await stateManager.getState();
                 if (newState?.lifecycle.growthPhase && previousPhase) {
                   await recordGrowthTransition(
-                    undefined,
+                    workspaceDir,
                     previousPhase,
                     newState.lifecycle.growthPhase
                   );
                 }
               }
             } catch (err) {
-              api.logger.warn(`Failed to record ceremony in RELATIONAL.md: ${err}`);
+              api.logger.warn(`Failed to record ceremony in documents: ${err}`);
             }
           }
         }
 
-        // Check for ceremony opportunity
+        // Build real ConversationContext from message signals
+        const content = event.content.toLowerCase();
         const conversationContext: ConversationContext = {
+          // Detect natural pauses (short messages after longer exchanges)
           isSessionEnd: false,
-          isNaturalPause: false,
-          isReflectiveMoment: false,
-          exchangeCount: 1,
-          tone: "casual",
-          positiveFeedback: false,
-          taskCompletion: false,
+          isNaturalPause: /^(thanks|thank you|that's all|got it|perfect|okay|ok|cheers|bye)\b/i.test(content),
+          // Detect reflective moments
+          isReflectiveMoment: /\b(thinking about|reflecting|looking back|realized|grateful|appreciate)\b/i.test(content),
+          // Use session count as a proxy for exchange depth
+          exchangeCount: Math.max(currentState.lifecycle.sessions, 3),
+          // Detect tone from message content
+          tone: detectMessageTone(event.content),
+          // Detect positive feedback
+          positiveFeedback: /\b(thank|thanks|awesome|great job|nice|well done|perfect|love it|amazing|brilliant)\b/i.test(content),
+          // Detect task completion signals
+          taskCompletion: /\b(done|finished|complete|shipped|deployed|merged|fixed|resolved|solved|that works)\b/i.test(content),
         };
 
         const opportunity = await checkCeremonyOpportunity(conversationContext);
@@ -487,6 +588,13 @@ export default {
           await stateManager.updateState((s) => {
             s.ceremony.pending = opportunity.type === "none" ? null : opportunity.type;
             s.ceremony.initiatedAt = Date.now();
+            // Persist candidate names so they survive across sessions
+            if (opportunity.ceremony?.context?.type === "naming") {
+              const namingCtx = opportunity.ceremony.context as { candidateNames?: Array<{ name: string; reasoning: string; connectionToRelationship: string; confidence: number }> };
+              if (namingCtx.candidateNames) {
+                s.ceremony.candidateNames = namingCtx.candidateNames;
+              }
+            }
           });
         }
       } catch (err) {

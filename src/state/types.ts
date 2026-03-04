@@ -208,6 +208,8 @@ export interface CeremonyState {
   nudged: boolean;
   lastReadinessCheck: number | null;
   lastReadiness: CeremonyReadiness | null;
+  /** Persisted candidate names from the prepared ceremony (so naming doesn't lose the proposal) */
+  candidateNames?: Array<{ name: string; reasoning: string; connectionToRelationship: string; confidence: number }>;
 }
 
 /**
@@ -276,6 +278,9 @@ export interface Instance25o1State {
 
   /** Usage patterns for SOUL.md evolution */
   usagePatterns?: UsagePatterns;
+
+  /** Last workspace dir seen (for ceremony outcomes that lack workspace context) */
+  lastWorkspaceDir?: string;
 
   /** Last updated timestamp */
   updatedAt: number;
