@@ -87,6 +87,8 @@ import {
 import { startHealthReporter } from "./network/reporter.js";
 import { startNetworkMonitor } from "./network/monitor.js";
 import { initRepairSystem } from "./network/repair.js";
+import { initNotificationManager } from "./network/notification.js";
+import { initSnapshotManager } from "./network/snapshot.js";
 import { register25o1Commands, type CliContext } from "./cli/commands.js";
 import {
   categorizeConversation,
@@ -525,12 +527,14 @@ export default {
         const workspaceDir = currentState.lastWorkspaceDir;
 
         // Check if this is a response to a pending ceremony
+        let ceremonyJustHandled = false;
         if (currentState.ceremony.pending) {
           const ceremonyType = currentState.ceremony.pending;
           const previousPhase = currentState.lifecycle.growthPhase;
           
           const result = await processCeremonyResponse(messageEvent, currentState);
           if (result.handled) {
+            ceremonyJustHandled = true;
             await stateManager.updateState((s) => {
               s.ceremony.pending = null;
               s.ceremony.initiatedAt = null;
@@ -564,6 +568,10 @@ export default {
             }
           }
         }
+
+        // Skip ceremony opportunity check if we just processed a ceremony response
+        // to prevent immediate back-to-back ceremony initiation
+        if (ceremonyJustHandled) return;
 
         // Build real ConversationContext from message signals
         const content = event.content.toLowerCase();
@@ -627,6 +635,13 @@ export default {
           ctx.logger.debug?.("25o1-network-monitor: Not primary, skipping");
           return;
         }
+
+        // Initialize notification and snapshot managers before repair system
+        initNotificationManager({
+          deliveryMethod: "queue",
+          logger: ctx.logger,
+        });
+        initSnapshotManager({ logger: ctx.logger });
 
         // Initialize repair system
         initRepairSystem({ logger: ctx.logger });

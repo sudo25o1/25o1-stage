@@ -291,7 +291,9 @@ describe("getRepairAction", () => {
 describe("DEFAULT_REPAIR_CONFIG", () => {
   it("should have reasonable defaults", () => {
     expect(DEFAULT_REPAIR_CONFIG.sshUser).toBe("admin");
-    expect(DEFAULT_REPAIR_CONFIG.sshKeyPath).toBe("~/.ssh/25o1_network");
+    expect(DEFAULT_REPAIR_CONFIG.sshKeyPath).toContain(".ssh/25o1_network");
+    // Should be an absolute path (no tilde — Node's spawn won't expand ~)
+    expect(DEFAULT_REPAIR_CONFIG.sshKeyPath).not.toContain("~");
     expect(DEFAULT_REPAIR_CONFIG.sshTimeout).toBe(30000);
   });
 });

@@ -27,6 +27,8 @@
  */
 
 import { spawn } from "node:child_process";
+import path from "node:path";
+import os from "node:os";
 import { getStateManager } from "../state/store.js";
 import type { PersistedIssue, ManagementTier } from "../state/types.js";
 import { getSnapshotManager, type SnapshotManager, type StateSnapshot } from "./snapshot.js";
@@ -99,7 +101,7 @@ export interface InstanceConnection {
 
 export const DEFAULT_REPAIR_CONFIG: Omit<RepairConfig, "logger"> = {
   sshUser: "admin",
-  sshKeyPath: "~/.ssh/25o1_network",
+  sshKeyPath: path.join(os.homedir(), ".ssh", "25o1_network"),
   sshTimeout: 30000,
 };
 
@@ -327,8 +329,17 @@ export class RepairSystem {
           return REPAIR_ACTIONS.reindex_qmd;
         }
         return REPAIR_ACTIONS.restart_qmd;
-      case "channel":
-        return REPAIR_ACTIONS.restart_channel;
+      case "channel": {
+        // Extract channel name from issue description and substitute into command template
+        const channelMatch = issue.description.match(/channel[:\s]+["']?(\w+)["']?/i);
+        const channelName = channelMatch?.[1] || "unknown";
+        return {
+          ...REPAIR_ACTIONS.restart_channel,
+          commands: REPAIR_ACTIONS.restart_channel.commands.map(
+            (cmd) => cmd.replace("${CHANNEL}", channelName)
+          ),
+        };
+      }
       case "system":
         if (issue.description.includes("sleep")) {
           return REPAIR_ACTIONS.enable_sleep_prevention;
@@ -368,6 +379,28 @@ export class RepairSystem {
         completedAt: new Date(),
         output: "",
         error: "Instance is self-managed, cannot execute remote repairs",
+      };
+    }
+
+    if (connection.managementTier === "remote_managed") {
+      this.config.logger.info(
+        `Instance ${instanceId} is remote_managed — repair ${action.name} requires user approval`
+      );
+      // Notify companion to ask for approval instead of auto-executing
+      if (this.notificationManager) {
+        this.notificationManager.notifyIssueDetected(
+          instanceId,
+          `Repair needed: ${action.name}. Awaiting your approval.`,
+          "medium"
+        );
+      }
+      return {
+        success: false,
+        action,
+        startedAt: new Date(),
+        completedAt: new Date(),
+        output: "",
+        error: "Instance is remote_managed, requires user approval before repair",
       };
     }
 
