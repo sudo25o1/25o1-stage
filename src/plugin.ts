@@ -94,16 +94,14 @@ import { register25o1Commands, type CliContext } from "./cli/commands.js";
 import {
   categorizeConversation,
   evolveSoul,
-  loadSoulDocument,
   ensureSoulDocument,
-  getSoulContext,
   recordNamingInSoul,
 } from "./documents/soul.js";
 import {
   addUserFact,
-  loadUserDocument,
-  getUserContext,
+  ensureUserDocument,
 } from "./documents/user.js";
+import { ensureIdentityDocument } from "./documents/bootstrap.js";
 import type { UsagePatterns } from "./state/types.js";
 
 // =============================================================================
@@ -230,11 +228,38 @@ export default {
 
       const contextParts: string[] = [];
 
+      // Write IDENTITY.md to workspace — OpenClaw's native bootstrap loader
+      // picks it up and injects it into the system prompt automatically.
+      // This establishes who the companion is and how it should behave.
+      if (context.workspaceDir) {
+        try {
+          await ensureIdentityDocument(context.workspaceDir, currentState);
+        } catch (err) {
+          api.logger.warn(`Failed to write IDENTITY.md: ${err}`);
+        }
+      }
+
+      // Ensure SOUL.md and USER.md exist in the workspace.
+      // OpenClaw natively injects these into the system prompt — we do NOT
+      // duplicate them in prependContext. We just ensure the files are there.
+      if (context.workspaceDir) {
+        try {
+          await ensureSoulDocument(context.workspaceDir, currentState);
+        } catch (err) {
+          api.logger.warn(`Failed to ensure SOUL.md: ${err}`);
+        }
+        try {
+          await ensureUserDocument(context.workspaceDir);
+        } catch (err) {
+          api.logger.warn(`Failed to ensure USER.md: ${err}`);
+        }
+      }
+
       // Check if this is a first meeting
       const firstMeeting = await isFirstMeeting(currentState.instance.id);
       
       if (firstMeeting) {
-        // Inject first meeting context
+        // Inject first meeting context (dynamic, per-turn guidance)
         const firstMeetingCtx: FirstMeetingContext = {
           agentId: currentState.instance.id,
           channel: context.messageProvider || "unknown",
@@ -254,30 +279,6 @@ export default {
           workspaceDir: context.workspaceDir,
           agentId: context.agentId || "main",
         });
-
-        // Inject SOUL.md identity context
-        try {
-          const soulContent = await ensureSoulDocument(context.workspaceDir, currentState);
-          const soulContext = getSoulContext(soulContent);
-          if (soulContext) {
-            contextParts.push(soulContext);
-            contextParts.push("");
-          }
-        } catch (err) {
-          api.logger.warn(`Failed to load SOUL.md: ${err}`);
-        }
-
-        // Inject USER.md knowledge context
-        try {
-          const userContent = await loadUserDocument(context.workspaceDir);
-          const userContext = getUserContext(userContent);
-          if (userContext) {
-            contextParts.push(userContext);
-            contextParts.push("");
-          }
-        } catch (err) {
-          api.logger.warn(`Failed to load USER.md: ${err}`);
-        }
 
         // Inject pending notifications (repair status, downtime, etc.)
         try {
