@@ -3,6 +3,27 @@
  *
  * Core state machine for agent lifecycle management.
  * Handles state transitions, validation, and persistence.
+ *
+ * STATUS: DISCONNECTED FROM RUNTIME
+ *
+ * This module defines a comprehensive lifecycle machine (12 states,
+ * 16 transition rules with guards and actions), but it is NOT wired
+ * into plugin.ts. The runtime manages lifecycle through direct mutations
+ * on Instance25o1State (see plugin.ts agent_end hook).
+ *
+ * Two parallel type systems exist:
+ *   - Runtime: LifecycleState (5 states) in state/types.ts
+ *   - Machine: AgentState (12 states) extending LifecycleState
+ *
+ * Integration would require:
+ *   1. Replace direct state mutations in plugin.ts with transition() calls
+ *   2. Persist AgentIdentity alongside (or instead of) LifecycleData
+ *   3. Bridge StateManager so AgentLifecycle can load/save its state
+ *   4. Handle the extra states (repairing, renaming, retiring, etc.)
+ *   5. Reconcile the two type systems
+ *
+ * This is deferred as an architecture migration — not a bug fix.
+ * The 36 tests pass in isolation and validate the machine's logic.
  */
 
 import { randomBytes } from "node:crypto";

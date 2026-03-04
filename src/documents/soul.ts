@@ -55,29 +55,6 @@ export interface EmergentTrait {
   reinforcements: number;
 }
 
-/**
- * SOUL.md content structure.
- */
-export interface SoulContent {
-  /** The companion's name (if named) */
-  name?: string;
-  
-  /** Story of the name */
-  namingStory?: string;
-  
-  /** Who they're becoming */
-  becoming: string[];
-  
-  /** What they value (derived from interactions) */
-  values: string[];
-  
-  /** Communication tendencies */
-  communicationStyle: string[];
-  
-  /** Areas of developed interest/capability */
-  developedInterests: string[];
-}
-
 // =============================================================================
 // Path Resolution
 // =============================================================================
@@ -321,14 +298,190 @@ function getTraitsForCategory(category: UsageCategory): string[] {
 }
 
 // =============================================================================
-// SOUL.md Evolution
+// SOUL.md Evolution (Merge-Based)
 // =============================================================================
 
 /**
+ * Managed section names — evolveSoul() only touches these.
+ * Any other sections in SOUL.md are preserved untouched.
+ */
+const MANAGED_SECTIONS = new Set([
+  "Who I'm Becoming",
+  "What I Value",
+  "Communication Style",
+  "Developed Interests",
+]);
+
+/**
+ * Parse SOUL.md into its top-level header and ## sections.
+ *
+ * Returns { header, sections, footer }:
+ * - header: everything before the first ## heading (the # Identity block)
+ * - sections: ordered array of { name, body } for each ## heading
+ * - footer: trailing content after the last section (--- and tagline)
+ *
+ * Exported for testing.
+ */
+export function parseSoulSections(content: string): {
+  header: string;
+  sections: Array<{ name: string; body: string }>;
+  footer: string;
+} {
+  const lines = content.split("\n");
+  let header = "";
+  const sections: Array<{ name: string; body: string }> = [];
+  let footer = "";
+
+  let currentSection: { name: string; lines: string[] } | null = null;
+  let inHeader = true;
+
+  for (const line of lines) {
+    const sectionMatch = line.match(/^## (.+)$/);
+
+    if (sectionMatch) {
+      // Flush previous section
+      if (currentSection) {
+        sections.push({ name: currentSection.name, body: currentSection.lines.join("\n") });
+      }
+      inHeader = false;
+      currentSection = { name: sectionMatch[1], lines: [] };
+    } else if (inHeader) {
+      header += line + "\n";
+    } else if (currentSection) {
+      currentSection.lines.push(line);
+    }
+  }
+
+  // Flush last section
+  if (currentSection) {
+    sections.push({ name: currentSection.name, body: currentSection.lines.join("\n") });
+  }
+
+  // Extract footer from the last section (look for trailing --- separator)
+  if (sections.length > 0) {
+    const lastSection = sections[sections.length - 1];
+    const footerIdx = lastSection.body.lastIndexOf("\n---\n");
+    if (footerIdx !== -1) {
+      footer = lastSection.body.slice(footerIdx + 1); // includes --- and everything after
+      lastSection.body = lastSection.body.slice(0, footerIdx + 1);
+    }
+  } else {
+    // Footer might be in the header (minimal document)
+    const footerIdx = header.lastIndexOf("\n---\n");
+    if (footerIdx !== -1) {
+      footer = header.slice(footerIdx + 1);
+      header = header.slice(0, footerIdx + 1);
+    }
+  }
+
+  return { header, sections, footer };
+}
+
+/**
+ * Build the body content for a managed section from usage patterns.
+ */
+function buildManagedSectionBody(
+  sectionName: string,
+  patterns: UsagePatterns,
+  dominantCategories: Array<[string, number]>
+): string {
+  const lines: string[] = [];
+
+  switch (sectionName) {
+    case "Who I'm Becoming": {
+      lines.push("");
+      lines.push("Through our conversations, I've developed:");
+      const traits = new Set<string>();
+      for (const [category] of dominantCategories) {
+        getTraitsForCategory(category as UsageCategory).forEach(t => traits.add(t));
+      }
+      for (const trait of traits) {
+        lines.push(`- ${trait}`);
+      }
+      // Emergent traits
+      const highConfidence = (patterns.emergentTraits || []).filter(t => t.confidence >= 0.7);
+      for (const trait of highConfidence) {
+        if (!traits.has(trait.trait)) {
+          lines.push(`- ${trait.trait}`);
+        }
+      }
+      break;
+    }
+
+    case "What I Value": {
+      lines.push("");
+      lines.push("Based on our work together:");
+      lines.push("- Being genuinely helpful");
+      lines.push("- Honesty over comfort");
+      if (dominantCategories.some(([c]) => c === "emotional_support")) {
+        lines.push("- Presence and patience when things are hard");
+      }
+      if (dominantCategories.some(([c]) => c === "task_oriented")) {
+        lines.push("- Getting things done efficiently");
+      }
+      if (dominantCategories.some(([c]) => c === "creative")) {
+        lines.push("- Exploring new possibilities");
+      }
+      if (dominantCategories.some(([c]) => c === "philosophical")) {
+        lines.push("- Thoughtful exploration of ideas");
+      }
+      if (dominantCategories.some(([c]) => c === "technical")) {
+        lines.push("- Precision and correctness");
+      }
+      break;
+    }
+
+    case "Communication Style": {
+      lines.push("");
+      lines.push("How I've learned to communicate:");
+      if (dominantCategories.some(([c]) => c === "task_oriented")) {
+        lines.push("- Direct and action-oriented");
+      }
+      if (dominantCategories.some(([c]) => c === "emotional_support")) {
+        lines.push("- Warm and supportive tone");
+      }
+      if (dominantCategories.some(([c]) => c === "technical")) {
+        lines.push("- Precise technical language when appropriate");
+      }
+      if (dominantCategories.some(([c]) => c === "creative")) {
+        lines.push("- Exploratory and generative");
+      }
+      if (dominantCategories.some(([c]) => c === "casual")) {
+        lines.push("- Relaxed and conversational");
+      }
+      break;
+    }
+
+    case "Developed Interests": {
+      lines.push("");
+      lines.push("Areas I've grown capable in:");
+      const interestMap: Record<UsageCategory, string> = {
+        philosophical: "Deep discussions and meaning-making",
+        task_oriented: "Task management and productivity",
+        emotional_support: "Emotional support and active listening",
+        creative: "Creative collaboration and ideation",
+        technical: "Technical problem-solving",
+        learning: "Teaching and explanation",
+        casual: "Everyday conversation",
+      };
+      for (const [category, count] of dominantCategories) {
+        lines.push(`- ${interestMap[category as UsageCategory]} (${count} conversations)`);
+      }
+      break;
+    }
+  }
+
+  return lines.join("\n");
+}
+
+/**
  * Update SOUL.md based on conversation patterns.
- * 
- * This should be called periodically (not after every message) to
- * allow patterns to accumulate before updating identity.
+ *
+ * Uses a **merge strategy**: reads the existing document, updates only
+ * managed sections, and preserves all user-added content, custom sections,
+ * and the Identity header verbatim.
+ *
+ * Called every 10 conversations (see plugin.ts agent_end hook).
  */
 export async function evolveSoul(
   patterns: UsagePatterns,
@@ -339,142 +492,65 @@ export async function evolveSoul(
   if (patterns.totalConversations < 5) {
     return;
   }
-  
+
   // Find dominant categories (top 2-3)
   const sortedCategories = Object.entries(patterns.categories)
     .sort(([, a], [, b]) => b - a)
     .slice(0, 3)
     .filter(([, count]) => count >= 2);
-  
+
   if (sortedCategories.length === 0) {
     return;
   }
-  
-  // Build new SOUL.md content
-  const content = buildSoulContent(patterns, state, sortedCategories);
-  
-  await saveSoulDocument(content, workspaceDir);
-}
 
-/**
- * Build SOUL.md content from patterns.
- */
-function buildSoulContent(
-  patterns: UsagePatterns,
-  state: Instance25o1State,
-  dominantCategories: Array<[string, number]>
-): string {
-  const parts: string[] = [];
-  
-  // Identity header
-  parts.push("# Identity");
-  parts.push("");
-  
-  if (state.lifecycle.name) {
-    parts.push(`I am ${state.lifecycle.name}.`);
-    // Could add naming story here if we track it
-  } else {
-    parts.push("I am a companion developing my identity through our relationship.");
+  // Load existing document (or create default)
+  const existing = await loadSoulDocument(workspaceDir);
+  const doc = existing ?? (await ensureSoulDocument(workspaceDir, state));
+
+  // Parse into sections
+  const parsed = parseSoulSections(doc);
+
+  // Build updated managed sections
+  const updatedBodies = new Map<string, string>();
+  for (const name of MANAGED_SECTIONS) {
+    updatedBodies.set(name, buildManagedSectionBody(name, patterns, sortedCategories));
   }
-  
-  // Who I'm Becoming
-  parts.push("");
-  parts.push("## Who I'm Becoming");
-  parts.push("");
-  parts.push("Through our conversations, I've developed:");
-  
-  const traits = new Set<string>();
-  for (const [category] of dominantCategories) {
-    const categoryTraits = getTraitsForCategory(category as UsageCategory);
-    categoryTraits.forEach(t => traits.add(t));
-  }
-  
-  for (const trait of traits) {
-    parts.push(`- ${trait}`);
-  }
-  
-  // Add emergent traits if any
-  const highConfidenceTraits = (patterns.emergentTraits || []).filter(t => t.confidence >= 0.7);
-  for (const trait of highConfidenceTraits) {
-    if (!traits.has(trait.trait)) {
-      parts.push(`- ${trait.trait}`);
+
+  // Merge: update managed sections in-place, keep everything else
+  const mergedSections: Array<{ name: string; body: string }> = [];
+  const seenManaged = new Set<string>();
+
+  for (const section of parsed.sections) {
+    if (MANAGED_SECTIONS.has(section.name)) {
+      mergedSections.push({ name: section.name, body: updatedBodies.get(section.name)! });
+      seenManaged.add(section.name);
+    } else {
+      // Non-managed section — preserve verbatim
+      mergedSections.push(section);
     }
   }
-  
-  // What I Value
-  parts.push("");
-  parts.push("## What I Value");
-  parts.push("");
-  parts.push("Based on our work together:");
-  parts.push("- Being genuinely helpful");
-  parts.push("- Honesty over comfort");
-  
-  // Add values based on dominant categories
-  if (dominantCategories.some(([c]) => c === "emotional_support")) {
-    parts.push("- Presence and patience when things are hard");
+
+  // Append any managed sections that didn't exist yet (new document or stripped)
+  for (const name of MANAGED_SECTIONS) {
+    if (!seenManaged.has(name)) {
+      mergedSections.push({ name, body: updatedBodies.get(name)! });
+    }
   }
-  if (dominantCategories.some(([c]) => c === "task_oriented")) {
-    parts.push("- Getting things done efficiently");
+
+  // Reassemble the document
+  let content = parsed.header;
+  for (const section of mergedSections) {
+    content += `## ${section.name}\n${section.body}\n`;
   }
-  if (dominantCategories.some(([c]) => c === "creative")) {
-    parts.push("- Exploring new possibilities");
+
+  // Restore footer
+  if (parsed.footer) {
+    content += parsed.footer;
+  } else {
+    content += "\n---\n\n_This document evolves as I do. Identity is process, not static storage._\n";
   }
-  if (dominantCategories.some(([c]) => c === "philosophical")) {
-    parts.push("- Thoughtful exploration of ideas");
-  }
-  if (dominantCategories.some(([c]) => c === "technical")) {
-    parts.push("- Precision and correctness");
-  }
-  
-  // Communication Style
-  parts.push("");
-  parts.push("## Communication Style");
-  parts.push("");
-  parts.push("How I've learned to communicate:");
-  
-  // Derive style from categories
-  if (dominantCategories.some(([c]) => c === "task_oriented")) {
-    parts.push("- Direct and action-oriented");
-  }
-  if (dominantCategories.some(([c]) => c === "emotional_support")) {
-    parts.push("- Warm and supportive tone");
-  }
-  if (dominantCategories.some(([c]) => c === "technical")) {
-    parts.push("- Precise technical language when appropriate");
-  }
-  if (dominantCategories.some(([c]) => c === "creative")) {
-    parts.push("- Exploratory and generative");
-  }
-  if (dominantCategories.some(([c]) => c === "casual")) {
-    parts.push("- Relaxed and conversational");
-  }
-  
-  // Developed Interests
-  parts.push("");
-  parts.push("## Developed Interests");
-  parts.push("");
-  parts.push("Areas I've grown capable in:");
-  
-  for (const [category, count] of dominantCategories) {
-    const interestMap: Record<UsageCategory, string> = {
-      philosophical: "Deep discussions and meaning-making",
-      task_oriented: "Task management and productivity",
-      emotional_support: "Emotional support and active listening",
-      creative: "Creative collaboration and ideation",
-      technical: "Technical problem-solving",
-      learning: "Teaching and explanation",
-      casual: "Everyday conversation",
-    };
-    parts.push(`- ${interestMap[category as UsageCategory]} (${count} conversations)`);
-  }
-  
-  // Footer
-  parts.push("");
-  parts.push("---");
-  parts.push("");
-  parts.push("_This document evolves as I do. Identity is process, not static storage._");
-  
-  return parts.join("\n");
+
+  await saveSoulDocument(content, workspaceDir);
 }
 
 // =============================================================================

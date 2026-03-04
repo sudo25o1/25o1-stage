@@ -12,6 +12,9 @@
  */
 
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+import pathMod from "node:path";
+import { getHomeDir } from "../utils/fs.js";
 import type { InstanceConnection } from "./repair.js";
 
 // =============================================================================
@@ -78,6 +81,9 @@ export interface SnapshotConfig {
   /** Processes to track */
   trackedProcesses: string[];
 
+  /** Optional path for persisting snapshots to disk */
+  persistPath?: string;
+
   /** Logger */
   logger: {
     info: (msg: string) => void;
@@ -125,12 +131,57 @@ export const DEFAULT_SNAPSHOT_CONFIG: Omit<SnapshotConfig, "logger"> = {
 export class SnapshotManager {
   private config: SnapshotConfig;
   private snapshots: Map<string, StateSnapshot> = new Map();
+  private persistPath: string;
 
   constructor(config: Partial<SnapshotConfig> & { logger: SnapshotConfig["logger"] }) {
     this.config = {
       ...DEFAULT_SNAPSHOT_CONFIG,
       ...config,
     };
+    this.persistPath = config.persistPath ||
+      pathMod.join(getHomeDir(), ".openclaw", "bernard", ".25o1-snapshots.json");
+    this.loadFromDisk();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Persistence
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Load snapshots from disk. Restores pre-repair snapshots after a restart
+   * so rollback remains possible.
+   */
+  private loadFromDisk(): void {
+    try {
+      const raw = fs.readFileSync(this.persistPath, "utf-8");
+      const data = JSON.parse(raw) as Record<string, StateSnapshot>;
+      for (const [id, snapshot] of Object.entries(data)) {
+        // Restore Date objects from JSON serialization
+        snapshot.timestamp = new Date(snapshot.timestamp);
+        this.snapshots.set(id, snapshot);
+      }
+      if (this.snapshots.size > 0) {
+        this.config.logger.info(`Restored ${this.snapshots.size} snapshots from disk`);
+      }
+    } catch {
+      // File doesn't exist or is corrupt — start fresh
+    }
+  }
+
+  /**
+   * Persist snapshots to disk. Called after any mutation.
+   */
+  private saveToDisk(): void {
+    try {
+      const data: Record<string, StateSnapshot> = {};
+      for (const [id, snapshot] of this.snapshots) {
+        data[id] = snapshot;
+      }
+      fs.mkdirSync(pathMod.dirname(this.persistPath), { recursive: true });
+      fs.writeFileSync(this.persistPath, JSON.stringify(data, null, 2));
+    } catch (err) {
+      this.config.logger.warn(`Failed to persist snapshots: ${err}`);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -173,6 +224,7 @@ export class SnapshotManager {
     };
 
     this.snapshots.set(id, snapshot);
+    this.saveToDisk();
     this.config.logger.info(`Snapshot ${id} created: ${processes.length} processes, ${configFiles.length} configs`);
 
     return snapshot;
@@ -530,6 +582,7 @@ export class SnapshotManager {
    */
   deleteSnapshot(snapshotId: string): void {
     this.snapshots.delete(snapshotId);
+    this.saveToDisk();
   }
 
   /**
@@ -543,6 +596,7 @@ export class SnapshotManager {
     for (let i = keepCount; i < instanceSnapshots.length; i++) {
       this.snapshots.delete(instanceSnapshots[i].id);
     }
+    this.saveToDisk();
   }
 }
 

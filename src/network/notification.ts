@@ -14,6 +14,9 @@
  * the customer has a relationship with, not the infrastructure.
  */
 
+import fs from "node:fs";
+import path from "node:path";
+import { getHomeDir } from "../utils/fs.js";
 import type { InstanceConnection } from "./repair.js";
 
 // =============================================================================
@@ -69,6 +72,9 @@ export interface CompanionMessage {
 export interface NotificationConfig {
   /** How to deliver notifications to the companion */
   deliveryMethod: "inject_context" | "direct_message" | "queue";
+
+  /** Optional path for persisting the notification queue to disk */
+  persistPath?: string;
 
   /** Logger */
   logger: {
@@ -148,9 +154,64 @@ const MESSAGE_TEMPLATES: Record<NotificationType, (ctx: NotificationContext) => 
 export class NotificationManager {
   private config: NotificationConfig;
   private pendingNotifications: Map<string, CompanionMessage[]> = new Map();
+  private persistPath: string;
 
   constructor(config: NotificationConfig) {
     this.config = config;
+    this.persistPath = config.persistPath ||
+      path.join(getHomeDir(), ".openclaw", "bernard", ".25o1-notifications.json");
+    this.loadFromDisk();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Persistence
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Load pending notifications from disk.
+   * Called on construction — restores state after a restart.
+   */
+  private loadFromDisk(): void {
+    try {
+      const raw = fs.readFileSync(this.persistPath, "utf-8");
+      const data = JSON.parse(raw) as Record<string, CompanionMessage[]>;
+      for (const [id, messages] of Object.entries(data)) {
+        if (Array.isArray(messages) && messages.length > 0) {
+          // Restore Date objects from JSON serialization
+          for (const msg of messages) {
+            if (msg.deliveryTime) {
+              msg.deliveryTime = new Date(msg.deliveryTime);
+            }
+          }
+          this.pendingNotifications.set(id, messages);
+        }
+      }
+      const totalCount = [...this.pendingNotifications.values()].reduce((s, q) => s + q.length, 0);
+      if (totalCount > 0) {
+        this.config.logger.info(`Restored ${totalCount} pending notifications from disk`);
+      }
+    } catch {
+      // File doesn't exist or is corrupt — start fresh
+    }
+  }
+
+  /**
+   * Persist pending notifications to disk.
+   * Called after any mutation to the queue.
+   */
+  private saveToDisk(): void {
+    try {
+      const data: Record<string, CompanionMessage[]> = {};
+      for (const [id, messages] of this.pendingNotifications) {
+        if (messages.length > 0) {
+          data[id] = messages;
+        }
+      }
+      fs.mkdirSync(path.dirname(this.persistPath), { recursive: true });
+      fs.writeFileSync(this.persistPath, JSON.stringify(data, null, 2));
+    } catch (err) {
+      this.config.logger.warn(`Failed to persist notifications: ${err}`);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -179,6 +240,7 @@ export class NotificationManager {
     const queue = this.pendingNotifications.get(instanceId) || [];
     queue.push(message);
     this.pendingNotifications.set(instanceId, queue);
+    this.saveToDisk();
 
     this.config.logger.info(
       `Created ${type} notification for ${instanceId} (deliver: ${deliverAt})`
@@ -331,6 +393,7 @@ export class NotificationManager {
     const queue = this.pendingNotifications.get(instanceId) || [];
     const remaining = queue.filter((msg) => !messages.includes(msg));
     this.pendingNotifications.set(instanceId, remaining);
+    this.saveToDisk();
 
     this.config.logger.info(`Delivered ${messages.length} notifications to ${instanceId}`);
   }
@@ -365,6 +428,7 @@ export class NotificationManager {
    */
   clearNotifications(instanceId: string): void {
     this.pendingNotifications.delete(instanceId);
+    this.saveToDisk();
   }
 
   /**
@@ -390,6 +454,14 @@ export function getNotificationManager(config?: NotificationConfig): Notificatio
     throw new Error("Notification manager not initialized");
   }
 
+  return notificationManagerInstance;
+}
+
+/**
+ * Safe getter — returns null instead of throwing if not initialized.
+ * Used in before_agent_start where client instances may not have the manager.
+ */
+export function tryGetNotificationManager(): NotificationManager | null {
   return notificationManagerInstance;
 }
 

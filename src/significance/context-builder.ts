@@ -130,7 +130,7 @@ function frameQuestionForMode(gap: GapItem, mode: TimeMode): string | null {
     case "personal":
       // More curious, relationship-oriented
       if (entity.match(/^[A-Z]/)) {
-        return `Who's ${entity}? You've mentioned them a few times.`;
+        return `Who's ${entity}?`;
       }
       return `Tell me more about ${entity.toLowerCase()} when you get a chance.`;
 

@@ -9,7 +9,13 @@
  */
 
 import fs from "node:fs";
-import { atomicWriteFile, getHomeDir } from "../utils/fs.js";
+import {
+  atomicWriteFile,
+  getHomeDir,
+  parseMarkdownSections,
+  assembleMarkdown,
+  findSection,
+} from "../utils/fs.js";
 import path from "node:path";
 
 // =============================================================================
@@ -127,43 +133,33 @@ export async function addUserFact(
   const dateStr = new Date().toISOString().split("T")[0];
   const entry = `- ${dateStr}: ${fact}`;
 
-  // Find the section and add to it
-  const sectionRegex = new RegExp(
-    `(## ${section}\\n\\n)((?:.|\\n)*?)(?=\\n---)`
-  );
+  const parsed = parseMarkdownSections(content);
+  let target = findSection(parsed, section);
 
-  const match = content.match(sectionRegex);
-  if (match) {
-    const sectionHeader = match[1];
-    const sectionContent = match[2];
-
-    let newContent: string;
-    // If it's the placeholder text, replace it
-    if (sectionContent.startsWith("(")) {
-      newContent = entry;
+  if (target) {
+    const body = target.body.trim();
+    if (body.startsWith("(")) {
+      // Placeholder text — replace it
+      target.body = "\n" + entry + "\n";
+    } else if (type === "update") {
+      target.body = "\n" + entry + "\n";
     } else {
-      // For "update" type, replace the section content; for "add", append
-      if (type === "update") {
-        newContent = entry;
-      } else {
-        newContent = sectionContent.trim() + "\n" + entry;
-      }
+      target.body = "\n" + body + "\n" + entry + "\n";
     }
-
-    content = content.replace(sectionRegex, `${sectionHeader}${newContent}\n`);
   } else {
-    // Section not found — append to Notes
-    const notesRegex = /(## Notes\n\n)((?:.|\n)*?)(?=\n---)/;
-    const notesMatch = content.match(notesRegex);
-    if (notesMatch) {
-      const notesContent = notesMatch[2];
-      const newNotes = notesContent.startsWith("(")
-        ? entry
-        : notesContent.trim() + "\n" + entry;
-      content = content.replace(notesRegex, `${notesMatch[1]}${newNotes}\n`);
+    // Section not found — fall back to Notes
+    target = findSection(parsed, "Notes");
+    if (target) {
+      const body = target.body.trim();
+      if (body.startsWith("(")) {
+        target.body = "\n" + entry + "\n";
+      } else {
+        target.body = "\n" + body + "\n" + entry + "\n";
+      }
     }
   }
 
+  content = assembleMarkdown(parsed);
   await saveUserDocument(content, workspaceDir);
 }
 
@@ -178,15 +174,21 @@ export async function addUserFact(
 export function getUserContext(userContent: string | null): string | null {
   if (!userContent) return null;
 
-  const sections: string[] = [];
-  // Match sections with actual content (not placeholders)
-  const sectionRegex = /## (\w[\w\s]*)\n\n((?:- .+\n?)+)/g;
-  let match;
-  while ((match = sectionRegex.exec(userContent)) !== null) {
-    sections.push(`**${match[1].trim()}:**\n${match[2].trim()}`);
+  const parsed = parseMarkdownSections(userContent);
+  const parts: string[] = [];
+
+  for (const section of parsed.sections) {
+    const body = section.body.trim();
+    // Skip placeholder sections (content starts with parenthesized text)
+    if (!body || body.startsWith("(")) continue;
+    // Only include sections that have bullet-point facts
+    const bulletLines = body.split("\n").filter(l => l.startsWith("- "));
+    if (bulletLines.length === 0) continue;
+
+    parts.push(`**${section.name}:**\n${bulletLines.join("\n")}`);
   }
 
-  if (sections.length === 0) return null;
+  if (parts.length === 0) return null;
 
-  return "## What You Know About This Person\n\n" + sections.join("\n\n");
+  return "## What You Know About This Person\n\n" + parts.join("\n\n");
 }

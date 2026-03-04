@@ -6,7 +6,14 @@
  */
 
 import fs from "node:fs";
-import { atomicWriteFile, getHomeDir } from "../utils/fs.js";
+import {
+  atomicWriteFile,
+  getHomeDir,
+  parseMarkdownSections,
+  assembleMarkdown,
+  findSection,
+  escapeRegExp,
+} from "../utils/fs.js";
 import path from "node:path";
 import type { Instance25o1State, Milestone, GrowthPhase } from "../state/types.js";
 
@@ -335,13 +342,14 @@ export async function updateRelationalSection(
   const current = await loadRelationalDocument(workspaceDir);
   if (!current) return;
 
-  // Simple section replacement
-  const sectionRegex = new RegExp(
-    `(## ${section}\\n)([\\s\\S]*?)(?=\\n## |\\n---|\$)`,
-    "i"
-  );
+  const parsed = parseMarkdownSections(current);
+  const target = findSection(parsed, section);
 
-  const updated = current.replace(sectionRegex, `$1${content}\n`);
+  if (!target) return; // Section not found — nothing to update
+
+  target.body = "\n" + content + "\n";
+
+  const updated = assembleMarkdown(parsed);
 
   if (updated !== current) {
     if (workspaceDir) {
@@ -366,18 +374,19 @@ export async function addGrowthMarker(
   const dateStr = (date || new Date()).toISOString().split("T")[0];
   const marker = `- ${dateStr}: ${description}`;
 
-  // Find the Growth Markers section and add to it
-  const updated = current.replace(
-    /(## Growth Markers\n\n)([\s\S]*?)(\n---)/,
-    (match, header, content, footer) => {
-      // If it's the placeholder, replace it
-      if (content.includes("(Timestamped significant moments")) {
-        return `${header}${marker}\n${footer}`;
-      }
-      // Otherwise append
-      return `${header}${content.trim()}\n${marker}\n${footer}`;
-    }
-  );
+  const parsed = parseMarkdownSections(current);
+  const section = findSection(parsed, "Growth Markers");
+
+  if (!section) return;
+
+  const body = section.body.trim();
+  if (body.includes("(Timestamped significant moments")) {
+    section.body = "\n" + marker + "\n";
+  } else {
+    section.body = "\n" + body + "\n" + marker + "\n";
+  }
+
+  const updated = assembleMarkdown(parsed);
 
   if (updated !== current) {
     if (workspaceDir) {
@@ -401,18 +410,19 @@ export async function addNote(
   const dateStr = new Date().toISOString().split("T")[0];
   const noteEntry = `- ${dateStr}: ${note}`;
 
-  // Find the Notes section and add to it
-  const updated = current.replace(
-    /(## Notes\n\n)([\s\S]*?)(\n---)/,
-    (match, header, content, footer) => {
-      // If it's the placeholder, replace it
-      if (content.includes("(Observations about the relationship")) {
-        return `${header}${noteEntry}\n${footer}`;
-      }
-      // Otherwise append
-      return `${header}${content.trim()}\n${noteEntry}\n${footer}`;
-    }
-  );
+  const parsed = parseMarkdownSections(current);
+  const section = findSection(parsed, "Notes");
+
+  if (!section) return;
+
+  const body = section.body.trim();
+  if (body.includes("(Observations about the relationship")) {
+    section.body = "\n" + noteEntry + "\n";
+  } else {
+    section.body = "\n" + body + "\n" + noteEntry + "\n";
+  }
+
+  const updated = assembleMarkdown(parsed);
 
   if (updated !== current) {
     if (workspaceDir) {
@@ -438,16 +448,37 @@ export async function updateTrustFromMilestone(
   const dateStr = new Date(milestone.date).toISOString().split("T")[0];
   const trustEntry = `- ${dateStr}: ${milestone.description}`;
 
-  // Add to "How Trust Was Built" section
-  const updated = current.replace(
-    /(### How Trust Was Built\n)([\s\S]*?)(\n---|\n##)/,
-    (match, header, content, footer) => {
-      if (content.includes("(Key moments that established trust)")) {
-        return `${header}${trustEntry}\n${footer}`;
-      }
-      return `${header}${content.trim()}\n${trustEntry}\n${footer}`;
-    }
-  );
+  const parsed = parseMarkdownSections(current);
+  const section = findSection(parsed, "Trust Levels");
+
+  if (!section) return;
+
+  // Find the ### How Trust Was Built subsection within the body
+  const subHeading = "### How Trust Was Built";
+  const subIdx = section.body.indexOf(subHeading);
+  if (subIdx === -1) return;
+
+  // Split the body at the subsection
+  const beforeSub = section.body.slice(0, subIdx);
+  const subContent = section.body.slice(subIdx + subHeading.length);
+
+  // Find the end of this subsection (next ### or end of body)
+  const nextSubIdx = subContent.indexOf("\n###");
+  const subBody = nextSubIdx !== -1 ? subContent.slice(0, nextSubIdx) : subContent;
+  const afterSub = nextSubIdx !== -1 ? subContent.slice(nextSubIdx) : "";
+
+  // Update the subsection body
+  const trimmedBody = subBody.trim();
+  let newSubBody: string;
+  if (trimmedBody.includes("(Key moments that established trust)")) {
+    newSubBody = "\n" + trustEntry + "\n";
+  } else {
+    newSubBody = "\n" + trimmedBody + "\n" + trustEntry + "\n";
+  }
+
+  section.body = beforeSub + subHeading + newSubBody + afterSub;
+
+  const updated = assembleMarkdown(parsed);
 
   if (updated !== current) {
     if (workspaceDir) {

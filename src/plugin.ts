@@ -59,6 +59,7 @@ import {
   buildContext,
   formatContextForPrompt,
   initQMDClient,
+  trackPatternObservation,
   type ConversationMessage,
 } from "./significance/index.js";
 import {
@@ -87,7 +88,7 @@ import {
 import { startHealthReporter } from "./network/reporter.js";
 import { startNetworkMonitor } from "./network/monitor.js";
 import { initRepairSystem } from "./network/repair.js";
-import { initNotificationManager } from "./network/notification.js";
+import { initNotificationManager, tryGetNotificationManager } from "./network/notification.js";
 import { initSnapshotManager } from "./network/snapshot.js";
 import { register25o1Commands, type CliContext } from "./cli/commands.js";
 import {
@@ -274,6 +275,20 @@ export default {
           api.logger.warn(`Failed to load USER.md: ${err}`);
         }
 
+        // Inject pending notifications (repair status, downtime, etc.)
+        try {
+          const notifMgr = tryGetNotificationManager();
+          if (notifMgr) {
+            const notifContext = notifMgr.buildContextInjection(currentState.instance.id);
+            if (notifContext) {
+              contextParts.push(notifContext);
+              contextParts.push("");
+            }
+          }
+        } catch (err) {
+          api.logger.warn(`Failed to inject notifications: ${err}`);
+        }
+
         // Add relational context (relationship state, lifecycle, ceremonies)
         if (relational) {
           contextParts.push(injectRelationalContext(relational, currentState));
@@ -447,6 +462,25 @@ export default {
               `mode=${result.analysis?.timeMode || "unknown"}`
             );
           }
+        }
+
+        // Track observations for cross-session pattern detection
+        try {
+          const userMessages = messages.filter(m => m.role === "user");
+          for (const msg of userMessages) {
+            if (msg.content.length > 10) {
+              await trackPatternObservation(
+                {
+                  type: "user_message",
+                  content: msg.content.slice(0, 500),
+                  timestamp: Date.now(),
+                },
+                context.workspaceDir
+              );
+            }
+          }
+        } catch (err) {
+          api.logger.warn(`Failed to track pattern observation: ${err}`);
         }
 
         // Track usage patterns for SOUL.md evolution

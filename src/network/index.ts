@@ -110,6 +110,7 @@ export {
 export {
   NotificationManager,
   getNotificationManager,
+  tryGetNotificationManager,
   initNotificationManager,
   type NotificationType,
   type NotificationContext,
