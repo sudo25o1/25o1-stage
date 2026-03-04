@@ -661,7 +661,12 @@ export class StatusReporter {
       const response = await this.fetchWithTimeout(this.config.networkEndpoint, 10000, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(report),
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          method: "25o1.report",
+          params: report,
+          id: Date.now()
+        }),
       });
 
       return response.ok;
@@ -875,9 +880,11 @@ export async function startHealthReporter(config: ReporterConfig): Promise<Repor
   logger.info(`Starting health reporter for ${instanceId}, reporting to ${bernardHost}`);
 
   // Create status reporter with adapted config
+  // Use /rpc endpoint for OpenClaw Gateway methods
+  const rpcEndpoint = bernardHost.endsWith('/') ? `${bernardHost}rpc` : `${bernardHost}/rpc`;
   const monitorConfig: Partial<MonitorConfig> = {
     reportInterval: Math.floor(intervalMs / 1000),
-    networkEndpoint: `${bernardHost}/api/25o1.report`,
+    networkEndpoint: rpcEndpoint,
   };
 
   reporterInstance = new StatusReporter(instanceId, instanceId, monitorConfig);

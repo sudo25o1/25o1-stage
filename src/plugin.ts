@@ -118,9 +118,13 @@ export default {
       getMemorySearchManager: async (params) => {
         try {
           // Dynamic import - at runtime, OpenClaw's memory module is available
-          // We use a variable to prevent TypeScript from resolving this at compile time
-          const memoryModulePath = "openclaw/memory";
-          const memoryModule = await import(/* @vite-ignore */ memoryModulePath);
+          // We use absolute path to bypass the package.json exports map restriction
+          const path = await import("node:path");
+          const memoryModulePath = path.join(process.cwd(), "node_modules", "openclaw", "dist", "plugin-sdk", "memory", "index.js");
+          // Convert to file:// URL for Windows compatibility and absolute imports
+          const importUrl = `file://${memoryModulePath.replace(/\\/g, "/")}`;
+          const memoryModule = await import(/* @vite-ignore */ importUrl);
+          
           if (memoryModule.getMemorySearchManager) {
             return await memoryModule.getMemorySearchManager(params);
           }
