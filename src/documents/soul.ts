@@ -14,6 +14,7 @@
  */
 
 import fs from "node:fs";
+import { atomicWriteFile, getHomeDir } from "../utils/fs.js";
 import path from "node:path";
 import type { Instance25o1State } from "../state/types.js";
 
@@ -88,7 +89,7 @@ export function getSoulPath(workspaceDir?: string): string {
   if (workspaceDir) {
     return path.join(workspaceDir, "SOUL.md");
   }
-  const homeDir = process.env.HOME || "~";
+  const homeDir = getHomeDir();
   return path.join(homeDir, ".openclaw", "bernard", "SOUL.md");
 }
 
@@ -153,7 +154,7 @@ export async function saveSoulDocument(
 ): Promise<void> {
   const soulPath = getSoulPath(workspaceDir);
   await fs.promises.mkdir(path.dirname(soulPath), { recursive: true });
-  await fs.promises.writeFile(soulPath, content, "utf-8");
+  await atomicWriteFile(soulPath, content);
 }
 
 /**

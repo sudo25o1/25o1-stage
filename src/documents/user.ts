@@ -9,6 +9,7 @@
  */
 
 import fs from "node:fs";
+import { atomicWriteFile, getHomeDir } from "../utils/fs.js";
 import path from "node:path";
 
 // =============================================================================
@@ -19,7 +20,7 @@ export function getUserPath(workspaceDir?: string): string {
   if (workspaceDir) {
     return path.join(workspaceDir, "USER.md");
   }
-  const homeDir = process.env.HOME || "/tmp";
+  const homeDir = getHomeDir();
   return path.join(homeDir, ".openclaw", "bernard", "USER.md");
 }
 
@@ -94,7 +95,7 @@ export async function loadUserDocument(workspaceDir?: string): Promise<string | 
 export async function saveUserDocument(content: string, workspaceDir?: string): Promise<void> {
   const userPath = getUserPath(workspaceDir);
   await fs.promises.mkdir(path.dirname(userPath), { recursive: true });
-  await fs.promises.writeFile(userPath, content, "utf-8");
+  await atomicWriteFile(userPath, content);
 }
 
 export async function ensureUserDocument(workspaceDir?: string): Promise<string> {

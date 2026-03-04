@@ -4,6 +4,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
+import { atomicWriteFile } from "../utils/fs.js";
 import * as path from "node:path";
 import * as os from "node:os";
 import {
@@ -110,7 +111,7 @@ describe("loadRelationalDocument", () => {
   it("loads existing document", async () => {
     const content = "# Test Relational Document";
     const relPath = getRelationalPath(testDir);
-    await fs.promises.writeFile(relPath, content);
+    await atomicWriteFile(relPath, content);
 
     const result = await loadRelationalDocument(testDir);
     expect(result).toBe(content);
@@ -119,7 +120,7 @@ describe("loadRelationalDocument", () => {
   it("loads from bernard directory when no workspace provided", async () => {
     const content = "# Bernard Relational Document";
     const bernardPath = path.join(testDir, ".openclaw", "bernard", "RELATIONAL.md");
-    await fs.promises.writeFile(bernardPath, content);
+    await atomicWriteFile(bernardPath, content);
 
     const result = await loadRelationalDocument();
     expect(result).toBe(content);
@@ -134,7 +135,7 @@ describe("relationalDocumentExists", () => {
 
   it("returns true when file exists", async () => {
     const relPath = getRelationalPath(testDir);
-    await fs.promises.writeFile(relPath, "# Test");
+    await atomicWriteFile(relPath, "# Test");
 
     const result = await relationalDocumentExists(testDir);
     expect(result).toBe(true);
@@ -185,7 +186,7 @@ describe("ensureRelationalDocument", () => {
   it("returns existing document if exists", async () => {
     const existingContent = "# Existing Document";
     const relPath = getRelationalPath(testDir);
-    await fs.promises.writeFile(relPath, existingContent);
+    await atomicWriteFile(relPath, existingContent);
 
     const content = await ensureRelationalDocument(testDir);
 

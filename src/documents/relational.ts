@@ -6,6 +6,7 @@
  */
 
 import fs from "node:fs";
+import { atomicWriteFile, getHomeDir } from "../utils/fs.js";
 import path from "node:path";
 import type { Instance25o1State, Milestone, GrowthPhase } from "../state/types.js";
 
@@ -82,7 +83,7 @@ export function getRelationalPath(workspaceDir: string): string {
  * Get the path to the bernard directory for storing relational docs.
  */
 export function getBernardRelationalPath(): string {
-  const homeDir = process.env.HOME || "~";
+  const homeDir = getHomeDir();
   return path.join(homeDir, ".openclaw", "bernard", "RELATIONAL.md");
 }
 
@@ -191,7 +192,7 @@ export async function saveRelationalDocument(
 ): Promise<void> {
   const relationalPath = getRelationalPath(workspaceDir);
   await fs.promises.mkdir(path.dirname(relationalPath), { recursive: true });
-  await fs.promises.writeFile(relationalPath, content, "utf-8");
+  await atomicWriteFile(relationalPath, content);
 }
 
 /**
@@ -200,7 +201,7 @@ export async function saveRelationalDocument(
 export async function saveBernardRelationalDocument(content: string): Promise<void> {
   const relationalPath = getBernardRelationalPath();
   await fs.promises.mkdir(path.dirname(relationalPath), { recursive: true });
-  await fs.promises.writeFile(relationalPath, content, "utf-8");
+  await atomicWriteFile(relationalPath, content);
 }
 
 // =============================================================================

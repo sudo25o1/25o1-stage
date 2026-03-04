@@ -14,6 +14,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { getHomeDir } from "../utils/fs.js";
 import type {
   Instance25o1State,
   InstanceRole,
@@ -28,7 +29,7 @@ import type {
  * Get the state file path.
  */
 export function getStatePath(stateDir?: string): string {
-  const baseDir = stateDir || path.join(process.env.HOME || "~", ".openclaw");
+  const baseDir = stateDir || path.join(getHomeDir(), ".openclaw");
   return path.join(baseDir, "25o1-state.json");
 }
 
@@ -181,6 +182,7 @@ export class StateManager {
   private state: Instance25o1State | null = null;
   private stateDir?: string;
   private loaded = false;
+  private updateQueue: Promise<unknown> = Promise.resolve();
 
   constructor(stateDir?: string) {
     this.stateDir = stateDir;
@@ -227,18 +229,27 @@ export class StateManager {
   /**
    * Update state (saves to disk).
    */
-  async updateState(
+  updateState(
     updater: (state: Instance25o1State) => Instance25o1State | void
   ): Promise<Instance25o1State> {
-    const current = await this.getState();
-    if (!current) {
-      throw new Error("State not initialized. Call initialize() first.");
-    }
+    const executeUpdate = async () => {
+      const current = await this.getState();
+      if (!current) {
+        throw new Error("State not initialized. Call initialize() first.");
+      }
 
-    const updated = updater(current) || current;
-    this.state = updated;
-    await saveState(updated, this.stateDir);
-    return updated;
+      // Clone state so we don't mutate memory until disk save succeeds
+      const stateClone = JSON.parse(JSON.stringify(current));
+      const updated = updater(stateClone) || stateClone;
+      
+      await saveState(updated, this.stateDir);
+      this.state = updated;
+      return updated;
+    };
+
+    const task = this.updateQueue.then(executeUpdate);
+    this.updateQueue = task.catch(() => Promise.resolve());
+    return task;
   }
 
   /**
