@@ -125,6 +125,9 @@ function detectMessageTone(content: string): "casual" | "celebratory" | "reflect
   if (/\b(frustrated|annoyed|stuck|confused|broken|failing|wrong|issue|problem|bug|error)\b/.test(lower)) {
     return "challenging";
   }
+  if (/\b(focus|working on|building|implementing|shipping|deploy|refactor|optimize|debug this|let's get|need to finish)\b/.test(lower)) {
+    return "focused";
+  }
 
   return "casual";
 }
@@ -150,6 +153,7 @@ export default {
     // using a path that works when the plugin is loaded by OpenClaw.
     initQMDClient({
       config: api.config,
+      logger: api.logger,
       getMemorySearchManager: async (params) => {
         try {
           // Dynamic import - at runtime, OpenClaw's memory module is available
@@ -559,6 +563,28 @@ export default {
 
         // Use persisted workspace dir for ceremony recordings (message context doesn't carry it)
         const workspaceDir = currentState.lastWorkspaceDir;
+
+        // Expire stale ceremonies (30 min timeout)
+        const CEREMONY_TIMEOUT_MS = 30 * 60 * 1000;
+        if (
+          currentState.ceremony.pending &&
+          currentState.ceremony.initiatedAt &&
+          Date.now() - currentState.ceremony.initiatedAt > CEREMONY_TIMEOUT_MS
+        ) {
+          api.logger.info(
+            `Ceremony "${currentState.ceremony.pending}" expired after ${CEREMONY_TIMEOUT_MS / 60000}min`
+          );
+          await stateManager.updateState((s) => {
+            s.ceremony.pending = null;
+            s.ceremony.initiatedAt = null;
+            s.ceremony.candidateNames = undefined;
+          });
+          // Re-read state after clearing
+          const refreshed = await stateManager.getState();
+          if (refreshed) {
+            Object.assign(currentState, refreshed);
+          }
+        }
 
         // Check if this is a response to a pending ceremony
         let ceremonyJustHandled = false;

@@ -83,6 +83,8 @@ export interface LifecycleData {
   state: LifecycleState;
   name?: string;
   growthPhase?: GrowthPhase;
+  /** When the current growth phase was entered (epoch ms) */
+  growthPhaseEnteredAt?: number;
   sessions: number;
   memories: number;
   created: number;

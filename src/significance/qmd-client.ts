@@ -7,7 +7,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { getHomeDir } from "../utils/fs.js";
+import { getHomeDir, atomicWriteFile } from "../utils/fs.js";
 import type { QMDMemory, GapItem, ContradictionItem, PatternItem, QMDContext } from "./types.js";
 
 // =============================================================================
@@ -49,6 +49,7 @@ let getMemoryManagerFn: ((params: {
   cfg: OpenClawConfigLike;
   agentId: string;
 }) => Promise<{ manager: MemorySearchManagerLike | null; error?: string }>) | null = null;
+let qmdLogger: { warn: (msg: string) => void } = { warn: console.warn };
 
 /**
  * Initialize the QMD client with OpenClaw's config and memory manager factory.
@@ -57,9 +58,13 @@ let getMemoryManagerFn: ((params: {
 export function initQMDClient(params: {
   config: OpenClawConfigLike;
   getMemorySearchManager: typeof getMemoryManagerFn;
+  logger?: { warn: (msg: string) => void };
 }): void {
   openclawConfig = params.config;
   getMemoryManagerFn = params.getMemorySearchManager;
+  if (params.logger) {
+    qmdLogger = params.logger;
+  }
 }
 
 /**
@@ -117,7 +122,7 @@ export async function queryQMDContext(
   } catch (error) {
     // If QMD is unavailable, return empty context
     // The companion should still function, just without memory enhancement
-    console.warn("QMD query failed:", error);
+    qmdLogger.warn(`QMD query failed: ${error}`);
     return {
       memories: [],
       gaps: [],
@@ -187,7 +192,7 @@ async function queryMemories(
 
     if (!manager) {
       if (error) {
-        console.warn("Memory manager unavailable:", error);
+        qmdLogger.warn(`Memory manager unavailable: ${error}`);
       }
       return [];
     }
@@ -211,7 +216,7 @@ async function queryMemories(
       },
     }));
   } catch (err) {
-    console.warn("Memory query failed:", err);
+    qmdLogger.warn(`Memory query failed: ${err}`);
     return [];
   }
 }
@@ -527,9 +532,8 @@ export async function trackPatternObservation(
     ? existing.slice(existing.length - MAX_OBSERVATIONS)
     : existing;
 
-  // Ensure directory exists
-  await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.promises.writeFile(filePath, JSON.stringify(trimmed, null, 2));
+  // Atomic write (mkdir handled internally by atomicWriteFile)
+  await atomicWriteFile(filePath, JSON.stringify(trimmed, null, 2));
 }
 
 /**

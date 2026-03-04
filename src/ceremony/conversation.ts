@@ -264,7 +264,7 @@ function buildAgentIdentityFromState(state: Instance25o1State): AgentIdentity {
     growthState: state.lifecycle.growthPhase
       ? {
           phase: state.lifecycle.growthPhase,
-          enteredPhase: new Date(state.lifecycle.lastActive), // Approximate
+          enteredPhase: new Date(state.lifecycle.growthPhaseEnteredAt || state.lifecycle.lastActive),
           capabilities: [],
           nextPhaseRequirements: [],
         }
@@ -737,6 +737,7 @@ export async function processCeremonyResponseAndUpdateState(
 
       await stateManager.updateState((s) => {
         s.lifecycle.growthPhase = newPhase;
+        s.lifecycle.growthPhaseEnteredAt = Date.now();
         s.ceremony.pending = null;
         s.ceremony.initiatedAt = null;
         s.lifecycle.milestones.push({

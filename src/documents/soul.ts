@@ -599,41 +599,41 @@ export function getSoulContext(soulContent: string | null): string {
   if (!soulContent) {
     return "## Your Identity\n\nYou are developing your identity through this relationship. You don't have a name yet.";
   }
-  
-  // Extract key sections for context
+
+  const parsed = parseSoulSections(soulContent);
   const parts: string[] = [];
   parts.push("## Your Identity");
   parts.push("");
-  
-  // Extract name if present
-  const nameMatch = soulContent.match(/^I am ([^.]+)\./m);
+
+  // Extract name from header (the "I am X." line)
+  const nameMatch = parsed.header.match(/^I am ([^.]+)\./m);
   if (nameMatch && !nameMatch[1].includes("companion")) {
     parts.push(`You are ${nameMatch[1]}.`);
   } else {
     parts.push("You are developing your identity through this relationship.");
   }
-  
-  // Extract "Who I'm Becoming" section
-  const becomingMatch = soulContent.match(/## Who I'm Becoming\n\n([\s\S]*?)(?=\n## |$)/);
-  if (becomingMatch) {
-    const traits = becomingMatch[1].trim().split("\n").filter(l => l.startsWith("-"));
+
+  // Extract traits from "Who I'm Becoming"
+  const becoming = parsed.sections.find(s => s.name === "Who I'm Becoming");
+  if (becoming) {
+    const traits = becoming.body.trim().split("\n").filter(l => l.startsWith("-"));
     if (traits.length > 0) {
       parts.push("");
       parts.push("Traits you've developed:");
-      parts.push(...traits.slice(0, 4)); // Top 4 traits
+      parts.push(...traits.slice(0, 4));
     }
   }
-  
-  // Extract "What I Value" section
-  const valuesMatch = soulContent.match(/## What I Value\n\n([\s\S]*?)(?=\n## |$)/);
-  if (valuesMatch) {
-    const values = valuesMatch[1].trim().split("\n").filter(l => l.startsWith("-"));
-    if (values.length > 0) {
+
+  // Extract values from "What I Value"
+  const values = parsed.sections.find(s => s.name === "What I Value");
+  if (values) {
+    const valueLines = values.body.trim().split("\n").filter(l => l.startsWith("-"));
+    if (valueLines.length > 0) {
       parts.push("");
       parts.push("What you value:");
-      parts.push(...values.slice(0, 3)); // Top 3 values
+      parts.push(...valueLines.slice(0, 3));
     }
   }
-  
+
   return parts.join("\n");
 }
