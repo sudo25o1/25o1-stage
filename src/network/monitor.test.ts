@@ -148,7 +148,11 @@ describe("NetworkMonitor", () => {
 
   afterEach(async () => {
     resetStateManager();
-    await fs.rm(tempDir, { recursive: true, force: true });
+    try {
+      await fs.rm(tempDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    } catch (e) {
+      // Ignore cleanup errors in tests if file is locked
+    }
   });
 
   describe("constructor", () => {
