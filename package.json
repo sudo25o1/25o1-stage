@@ -1,0 +1,45 @@
+{
+  "name": "25o1",
+  "version": "0.1.0",
+  "description": "Persistent relational AI companions - relationship layer for OpenClaw",
+  "type": "module",
+  "main": "dist/plugin.js",
+  "types": "dist/plugin.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest",
+    "lint": "oxlint src/",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/plugin.js"
+    ]
+  },
+  "files": [
+    "dist/",
+    "templates/",
+    "!dist/**/*.test.js",
+    "!dist/**/*.test.js.map",
+    "!dist/**/*.test.d.ts",
+    "!dist/**/*.test.d.ts.map"
+  ],
+  "keywords": [
+    "openclaw",
+    "plugin",
+    "ai",
+    "companion",
+    "relational",
+    "persistent"
+  ],
+  "license": "MIT"
+}

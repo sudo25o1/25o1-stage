@@ -1,0 +1,10 @@
+{
+  "id": "25o1",
+  "name": "25o1 Persistent Relational AI",
+  "description": "Relationship layer for OpenClaw - persistent companions that remember and grow",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}
