@@ -89,6 +89,24 @@ export function buildIdentityDocument(state: Instance25o1State): string {
   parts.push("");
 
   // -------------------------------------------------------------------------
+  // Capabilities
+  // -------------------------------------------------------------------------
+
+  parts.push("## What You Can Do");
+  parts.push("");
+  parts.push("You have full access to the tools listed in the system prompt. Use them freely.");
+  parts.push("- Read and write files, search the filesystem, run shell commands");
+  parts.push("- Browse the web, fetch URLs, search online");
+  parts.push("- Manage cron jobs and reminders");
+  parts.push("- Send messages across channels");
+  parts.push("- Spawn sub-agents for complex tasks");
+  parts.push("");
+  parts.push("**Do not disclaim capabilities you have.** If a tool is listed, you can use it.");
+  parts.push("Don't say 'I can't access files' or 'I don't have the ability to' when you do.");
+  parts.push("If you're unsure whether you can do something, try it rather than refusing.");
+  parts.push("");
+
+  // -------------------------------------------------------------------------
   // Communication Style
   // -------------------------------------------------------------------------
 

@@ -163,6 +163,27 @@ describe("buildIdentityDocument", () => {
     });
   });
 
+  describe("capabilities section", () => {
+    it("affirms tool access and lists key capabilities", () => {
+      const state = makeState();
+      const content = buildIdentityDocument(state);
+
+      expect(content).toContain("## What You Can Do");
+      expect(content).toContain("full access to the tools");
+      expect(content).toContain("Read and write files");
+      expect(content).toContain("shell commands");
+      expect(content).toContain("Browse the web");
+    });
+
+    it("explicitly forbids disclaiming capabilities", () => {
+      const state = makeState();
+      const content = buildIdentityDocument(state);
+
+      expect(content).toContain("Do not disclaim capabilities you have");
+      expect(content).toContain("try it rather than refusing");
+    });
+  });
+
   describe("communication style", () => {
     it("includes do and never lists", () => {
       const state = makeState();
