@@ -152,6 +152,29 @@ describe("recordFirstMeetingComplete", () => {
     const stateAfter = await stateManager.getState();
     expect(stateAfter?.lifecycle.state).toBe("learning");
   });
+
+  it("clears ceremony.pending when first meeting completes", async () => {
+    const stateManager = getStateManager();
+    await stateManager.initialize("test-agent", {
+      role: "client",
+      managementTier: "fully_managed",
+    });
+
+    // Simulate stuck state: ceremony.pending still set
+    await stateManager.updateState((s) => {
+      s.ceremony.pending = "first_meeting";
+      s.ceremony.initiatedAt = Date.now() - 86400000; // 1 day ago
+    });
+
+    const stateBefore = await stateManager.getState();
+    expect(stateBefore?.ceremony.pending).toBe("first_meeting");
+
+    await recordFirstMeetingComplete("test-agent");
+
+    const stateAfter = await stateManager.getState();
+    expect(stateAfter?.ceremony.pending).toBeNull();
+    expect(stateAfter?.ceremony.initiatedAt).toBeNull();
+  });
 });
 
 // =============================================================================

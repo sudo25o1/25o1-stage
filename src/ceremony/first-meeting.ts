@@ -205,6 +205,10 @@ export async function recordFirstMeetingComplete(
       significance: "The relationship began",
     });
 
+    // Clear ceremony state — first meeting is done
+    state.ceremony.pending = null;
+    state.ceremony.initiatedAt = null;
+
     // Transition to learning state
     if (state.lifecycle.state === "hatched") {
       state.lifecycle.state = "learning";

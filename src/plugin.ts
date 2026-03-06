@@ -45,6 +45,17 @@ interface MessageReceivedEvent {
   timestamp?: number;
   metadata?: Record<string, unknown>;
 }
+
+interface MessageSendingEvent {
+  to: string;
+  content: string;
+  metadata?: Record<string, unknown>;
+}
+
+interface MessageSendingResult {
+  content?: string;
+  cancel?: boolean;
+}
 import { getStateManager } from "./state/store.js";
 import {
   injectRelationalContext,
@@ -62,6 +73,7 @@ import {
   trackPatternObservation,
   type ConversationMessage,
 } from "./significance/index.js";
+import { extractMetaBlock, type MetaBlock } from "./significance/meta-block.js";
 import {
   isFirstMeeting,
   checkFirstMeetingCompletion,
@@ -100,9 +112,22 @@ import {
 import {
   addUserFact,
   ensureUserDocument,
+  loadUserDocument,
+  countUserFacts,
 } from "./documents/user.js";
 import { ensureIdentityDocument } from "./documents/bootstrap.js";
 import type { UsagePatterns } from "./state/types.js";
+
+// =============================================================================
+// Meta Block Stash
+// =============================================================================
+
+/**
+ * Session-scoped stash for the most recently extracted meta block.
+ * Written by message_sending hook, read by agent_end hook.
+ * Reset each time message_sending fires.
+ */
+let lastMetaBlock: MetaBlock | null = null;
 
 // =============================================================================
 // Helpers
@@ -225,6 +250,46 @@ export default {
     ) => {
       const currentState = await stateManager.getState();
       if (!currentState) return; // Not initialized, skip
+
+      // Repair stale ceremony state: if first meeting completed but
+      // ceremony.pending is still "first_meeting", clear it.
+      if (
+        currentState.firstMeeting.completed &&
+        currentState.ceremony.pending === "first_meeting"
+      ) {
+        await stateManager.updateState((s) => {
+          s.ceremony.pending = null;
+          s.ceremony.initiatedAt = null;
+        });
+        // Refresh state after repair
+        const refreshed = await stateManager.getState();
+        if (refreshed) {
+          Object.assign(currentState, refreshed);
+        }
+      }
+
+      // Backfill memories counter: if sessions > 0 but memories = 0,
+      // count existing facts in USER.md and seed the counter.
+      if (
+        currentState.lifecycle.sessions > 0 &&
+        currentState.lifecycle.memories === 0
+      ) {
+        try {
+          const userContent = await loadUserDocument(context.workspaceDir);
+          const factCount = countUserFacts(userContent);
+          if (factCount > 0) {
+            await stateManager.updateState((s) => {
+              s.lifecycle.memories = factCount;
+            });
+            const refreshed = await stateManager.getState();
+            if (refreshed) {
+              Object.assign(currentState, refreshed);
+            }
+          }
+        } catch {
+          // Non-critical — counter will increment from here on
+        }
+      }
 
       const contextParts: string[] = [];
 
@@ -445,6 +510,16 @@ export default {
             }
           }
 
+          // Increment memories counter based on updates applied
+          const updateCount = result.analysis?.updates?.filter(
+            u => u.priority !== "skip"
+          ).length ?? 0;
+          if (updateCount > 0) {
+            await stateManager.updateState((s) => {
+              s.lifecycle.memories += updateCount;
+            });
+          }
+
           // Update RELATIONAL.md with milestone
           if (result.milestone) {
             try {
@@ -488,9 +563,34 @@ export default {
           api.logger.warn(`Failed to track pattern observation: ${err}`);
         }
 
+        // Process meta block from companion's response (if present)
+        // The meta block was stashed by the message_sending hook
+        const metaBlock = lastMetaBlock;
+        lastMetaBlock = null; // Reset for next turn
+
+        if (metaBlock) {
+          // Write facts from meta block to USER.md
+          if (metaBlock.facts.length > 0 && context.workspaceDir) {
+            for (const fact of metaBlock.facts) {
+              try {
+                await addUserFact(context.workspaceDir, "Notes", fact, "add");
+              } catch (err) {
+                api.logger.warn(`Failed to write fact to USER.md: ${err}`);
+              }
+            }
+            // Increment memories counter
+            await stateManager.updateState((s) => {
+              s.lifecycle.memories += metaBlock.facts.length;
+            });
+          }
+        }
+
         // Track usage patterns for SOUL.md evolution
+        // Use meta block category if available, fall back to regex
         try {
-          const categories = categorizeConversation(messages);
+          const categories = metaBlock
+            ? [metaBlock.category]
+            : categorizeConversation(messages);
           const updatedState = await stateManager.getState();
           
           if (updatedState) {
@@ -669,6 +769,33 @@ export default {
       } catch (err) {
         api.logger.warn(`Ceremony check failed: ${err}`);
       }
+    });
+
+    // =========================================================================
+    // message_sending — strip meta blocks before delivery
+    // =========================================================================
+
+    api.on("message_sending", (
+      event: MessageSendingEvent,
+      _context: MessageContext
+    ): MessageSendingResult | void => {
+      if (!event.content) return;
+
+      const { cleaned, meta } = extractMetaBlock(event.content);
+
+      if (meta) {
+        // Stash the meta block for agent_end to pick up
+        lastMetaBlock = meta;
+        api.logger.info(
+          `Meta block extracted: significance=${meta.significance}, category=${meta.category}, ` +
+          `facts=${meta.facts.length}, entities=${meta.entities.length}`
+        );
+        // Return cleaned content (meta block stripped)
+        return { content: cleaned };
+      }
+
+      // No meta block found — pass through unchanged
+      return;
     });
 
     // =========================================================================

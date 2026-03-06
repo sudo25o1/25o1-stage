@@ -13,6 +13,7 @@ import {
   addUserFact,
   getUserContext,
   getUserPath,
+  countUserFacts,
 } from "./user.js";
 
 describe("USER.md Management", () => {
@@ -224,6 +225,52 @@ describe("USER.md Management", () => {
       expect(result).toContain("**Work:**");
       expect(result).toContain("**Interests:**");
       expect(result).toContain("## What You Know About This Person");
+    });
+  });
+
+  describe("countUserFacts", () => {
+    it("returns 0 for null content", () => {
+      expect(countUserFacts(null)).toBe(0);
+    });
+
+    it("returns 0 for empty template", () => {
+      const template = `# About You\n\n## Work\n\n(Nothing yet)\n\n## Family\n\n(Nothing yet)\n`;
+      expect(countUserFacts(template)).toBe(0);
+    });
+
+    it("counts bullet points across sections", () => {
+      const content = `# About You
+
+## Work
+
+- Software engineer at Acme Corp
+- Works on AI projects
+
+## Family
+
+- Has a daughter
+- Wife mentioned in medical decisions
+
+## Interests
+
+(Nothing yet)
+
+---`;
+      expect(countUserFacts(content)).toBe(4);
+    });
+
+    it("ignores non-bullet content", () => {
+      const content = `# About You
+
+## Notes
+
+Some random text here.
+Not a bullet point.
+- This is a fact
+- And this too
+
+---`;
+      expect(countUserFacts(content)).toBe(2);
     });
   });
 });

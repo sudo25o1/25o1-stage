@@ -168,6 +168,26 @@ export async function addUserFact(
 // =============================================================================
 
 /**
+ * Count the number of facts (bullet points) in USER.md.
+ * Used to backfill the memories counter for existing deployments.
+ */
+export function countUserFacts(userContent: string | null): number {
+  if (!userContent) return 0;
+
+  const parsed = parseMarkdownSections(userContent);
+  let count = 0;
+
+  for (const section of parsed.sections) {
+    const body = section.body.trim();
+    if (!body || body.startsWith("(")) continue;
+    const bulletLines = body.split("\n").filter(l => l.startsWith("- "));
+    count += bulletLines.length;
+  }
+
+  return count;
+}
+
+/**
  * Format USER.md content for system prompt injection.
  * Extracts non-placeholder sections only.
  */
