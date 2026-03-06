@@ -316,6 +316,37 @@ describe("buildIdentityDocument", () => {
     });
   });
 
+  describe("memory tagging instruction", () => {
+    it("includes the meta block format and rules", () => {
+      const state = makeState();
+      const content = buildIdentityDocument(state);
+
+      expect(content).toContain("## Memory Tagging");
+      expect(content).toContain("25o1:meta");
+      expect(content).toContain("significance:");
+      expect(content).toContain("category:");
+      expect(content).toContain("facts:");
+      expect(content).toContain("entities:");
+    });
+
+    it("instructs to skip for trivial exchanges", () => {
+      const state = makeState();
+      const content = buildIdentityDocument(state);
+
+      expect(content).toContain("trivial exchanges");
+      expect(content).toContain("stripped before delivery");
+    });
+
+    it("is the last section (recency bias)", () => {
+      const state = makeState();
+      const content = buildIdentityDocument(state);
+
+      const sections = content.match(/^## .+$/gm) || [];
+      const lastSection = sections[sections.length - 1];
+      expect(lastSection).toBe("## Memory Tagging");
+    });
+  });
+
   describe("output format", () => {
     it("returns a string with markdown headers", () => {
       const state = makeState();

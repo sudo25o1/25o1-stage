@@ -184,6 +184,35 @@ export function buildIdentityDocument(state: Instance25o1State): string {
   parts.push("Use that context naturally. Don't announce it.");
   parts.push("Don't say 'According to my records...' — just know things the way a person who remembers would.");
   parts.push("If something seems wrong, trust the human's correction over your records.");
+  parts.push("");
+
+  // -------------------------------------------------------------------------
+  // Memory Tagging (MUST be last — recency bias)
+  // -------------------------------------------------------------------------
+
+  parts.push("## Memory Tagging");
+  parts.push("");
+  parts.push("At the end of conversations where something worth remembering happened, you MUST include a memory tag.");
+  parts.push("This is an HTML comment — the human will never see it. It helps you remember for next time.");
+  parts.push("");
+  parts.push("Format (include at the very end of your response):");
+  parts.push("```");
+  parts.push("<!-- 25o1:meta");
+  parts.push("significance: [1-10]");
+  parts.push("category: [casual|technical|emotional_support|philosophical|creative|task_oriented|learning]");
+  parts.push("facts: [comma-separated new facts learned about them]");
+  parts.push("entities: [comma-separated people, places, projects mentioned]");
+  parts.push("emotions: [comma-separated emotional tones detected]");
+  parts.push("topics: [comma-separated topic tags]");
+  parts.push("-->");
+  parts.push("```");
+  parts.push("");
+  parts.push("**Rules:**");
+  parts.push("- Include it when significance is 4 or higher");
+  parts.push("- Skip it for trivial exchanges (quick questions, one-word answers, greetings)");
+  parts.push("- Be honest about significance — don't inflate scores");
+  parts.push("- Facts should only include things the human actually said, not your inferences");
+  parts.push("- The human never sees this block — it's stripped before delivery");
 
   return parts.join("\n");
 }

@@ -4,7 +4,10 @@
  * Commands for setup, status, and network management.
  */
 
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { getStateManager } from "../state/store.js";
+import { getHomeDir } from "../utils/fs.js";
 import type { Instance25o1State, InstanceRole, ManagementTier } from "../state/types.js";
 
 // =============================================================================
@@ -102,6 +105,96 @@ export function register25o1Commands(ctx: CliContext): void {
 // Command Implementations
 // =============================================================================
 
+// =============================================================================
+// OpenClaw Configuration
+// =============================================================================
+
+/**
+ * Ensure OpenClaw's tool profile is set to at least "coding" for 25o1.
+ *
+ * OpenClaw's onboarding wizard defaults tools.profile to "messaging", which
+ * only gives the agent message/session tools. A 25o1 companion needs
+ * filesystem, runtime, memory, and web tools at minimum.
+ *
+ * This reads ~/.openclaw/openclaw.json, checks the tool profile, and
+ * upgrades it if needed. Uses alsoAllow if the user has a custom profile
+ * to avoid overriding their choice.
+ */
+async function configureOpenClawToolAccess(): Promise<void> {
+  const homeDir = getHomeDir();
+  const configPath = path.join(homeDir, ".openclaw", "openclaw.json");
+
+  let config: Record<string, unknown> = {};
+  let configExists = false;
+
+  try {
+    const raw = await fs.promises.readFile(configPath, "utf-8");
+    config = JSON.parse(raw);
+    configExists = true;
+  } catch {
+    // Config doesn't exist or is invalid — we'll create/fix it
+  }
+
+  // Get or create tools section
+  const tools = (config.tools as Record<string, unknown>) || {};
+  const currentProfile = tools.profile as string | undefined;
+
+  // Determine what to do
+  if (currentProfile === "full" || currentProfile === "coding") {
+    // Already sufficient
+    // eslint-disable-next-line no-console
+    console.log(`  Tool access: ${currentProfile} (already configured)`);
+    return;
+  }
+
+  if (!currentProfile || currentProfile === "messaging" || currentProfile === "minimal") {
+    // Restrictive or missing — upgrade to coding
+    tools.profile = "coding";
+    // Also allow web and automation tools that coding doesn't include
+    const alsoAllow = (tools.alsoAllow as string[]) || [];
+    const needed = ["group:web", "group:automation", "group:memory"];
+    for (const group of needed) {
+      if (!alsoAllow.includes(group)) {
+        alsoAllow.push(group);
+      }
+    }
+    tools.alsoAllow = alsoAllow;
+    config.tools = tools;
+
+    // Write back
+    await fs.promises.mkdir(path.dirname(configPath), { recursive: true });
+    await fs.promises.writeFile(configPath, JSON.stringify(config, null, 2) + "\n");
+
+    // eslint-disable-next-line no-console
+    console.log(`  Tool access: coding + web + automation + memory`);
+    if (configExists && currentProfile) {
+      // eslint-disable-next-line no-console
+      console.log(`    (upgraded from "${currentProfile}" — 25o1 needs filesystem and runtime access)`);
+    }
+  } else {
+    // Custom profile — don't override, use alsoAllow
+    const alsoAllow = (tools.alsoAllow as string[]) || [];
+    const needed = ["group:fs", "group:runtime", "group:web", "group:automation", "group:memory", "group:sessions"];
+    let added = false;
+    for (const group of needed) {
+      if (!alsoAllow.includes(group)) {
+        alsoAllow.push(group);
+        added = true;
+      }
+    }
+    if (added) {
+      tools.alsoAllow = alsoAllow;
+      config.tools = tools;
+      await fs.promises.writeFile(configPath, JSON.stringify(config, null, 2) + "\n");
+      // eslint-disable-next-line no-console
+      console.log(`  Tool access: added required tool groups to existing "${currentProfile}" profile`);
+    } else {
+      // eslint-disable-next-line no-console
+      console.log(`  Tool access: ${currentProfile} (required tools already allowed)`);
+    }
+  }
+}
+
 async function setupCommand(options: Record<string, unknown>): Promise<void> {
   const stateManager = getStateManager();
   const existingState = await stateManager.getState();
@@ -189,8 +282,18 @@ async function setupCommand(options: Record<string, unknown>): Promise<void> {
 
   await stateManager.setState(initialState);
 
+  // Configure OpenClaw tool access
+  try {
+    await configureOpenClawToolAccess();
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.log(`  Warning: Could not configure tool access: ${err}`);
+    // eslint-disable-next-line no-console
+    console.log("  You may need to manually set tools.profile in ~/.openclaw/openclaw.json");
+  }
+
   // eslint-disable-next-line no-console
-  console.log("25o1 configured successfully!");
+  console.log("\n25o1 configured successfully!");
   // eslint-disable-next-line no-console
   console.log(`  Instance ID: ${instanceId}`);
   // eslint-disable-next-line no-console
